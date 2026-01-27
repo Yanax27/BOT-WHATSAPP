@@ -1,0 +1,24 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+rag_api/storage/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Auth / sesiones WhatsApp
+wa_bot/auth/
+wa_bot/.wwebjs_auth/
+wa_bot/.wwebjs_cache/
+
+# Env
+.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
