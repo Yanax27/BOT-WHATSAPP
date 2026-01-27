@@ -14,3 +14,8 @@ Trabaje en el sector publico bastante años, con responsabilidad y transparencia
 
 Mejorar empleo, educación y salud.
 
+\## Propuestas
+
+Mejorar la salud 
+Contruir Hospitales
+Asfaltar camninos en los barrios aledaños
