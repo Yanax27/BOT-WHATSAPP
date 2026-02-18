@@ -1,223 +1,232 @@
-function normalize(s) {
-  return (s || '').trim();
+function normalize(s) { return (s || '').trim(); }
+function normLower(s) { return normalize(s).toLowerCase(); }
+
+function stripAccents(s) {
+  return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
-function normLower(s) {
-  return normalize(s).toLowerCase();
+function containsAbuse(text) {
+  const t = stripAccents(normLower(text));
+
+  // Lista base (ampliala si querés)
+  const bad = [
+    'puta','puto','mierda','carajo','verga','concha','pelotudo','pelotuda',
+    'boludo','boluda','imbecil','idiota','estupido','estupida','pendejo','pendeja',
+    'hijo de puta','hdp','burro','idiota', 'cabron','inutil','huevon', 'maricon', 'maleante', 'ladron', 'ratero', 'Maleante'
+  ];
+
+  return bad.some(w => t.includes(w));
 }
 
 function isYes(text) {
   const t = normLower(text);
-  return ['si', 'sí', 's', 'claro', 'ok', 'dale', 'por supuesto', 'de una', 'quiero', 'me interesa'].some(x => t === x || t.includes(x));
+  return ['si','sí','s','claro','ok','dale','de una','por supuesto','me interesa','quiero','okey'].some(x => t === x || t.includes(x));
 }
-
 function isNo(text) {
   const t = normLower(text);
-  return ['no', 'n', 'nop', 'para nada', 'no gracias'].some(x => t === x || t.includes(x));
+  return ['no','n','nop','no gracias','para nada'].some(x => t === x || t.includes(x));
 }
 
-// Clasificación simple POSITIVA / NEUTRA / NEGATIVA-DESCONOCE
-function classifyMate(text) {
+function looksLikeClosing(text) {
   const t = normLower(text);
-  if (!t) return 'NEUTRA';
-
-  const positive = ['bien', 'bueno', 'excelente', 'me gusta', 'me parece', 'esperanza', 'cambio', 'apoyo', 'confio', 'confío'];
-  const negative = ['malo', 'corrup', 'no sirve', 'mentira', 'ladron', 'ladrón', 'estafa', 'no creo', 'cansado', 'cansada'];
-  const unknown = ['no', 'nunca', 'quien', 'quién', 'no conozco', 'no se', 'no sé', 'primera vez'];
-
-  if (negative.some(w => t.includes(w))) return 'NEGATIVA';
-  if (positive.some(w => t.includes(w))) return 'POSITIVA';
-  if (unknown.some(w => t.includes(w))) return 'DESCONOCE';
-  return 'NEUTRA';
+  return [
+    'eso es todo','nada mas','nada más','listo','ok gracias','gracias','muchas gracias',
+    'chau','chao','adios','adiós','bye','ok'
+  ].some(x => t === x || t.includes(x));
 }
 
-/**
- * Session shape:
- * {
- *   step: number,
- *   barrio: string|null,
- *   afiliado: 'SI'|'NO'|null,
- *   rival: string|null,
- *   razon: string|null,
- *   demanda: string|null,
- *   lastSentAt: number
- * }
- */
+function looksLikeNonsense(text) {
+  const t = normLower(text);
+  if (!t) return false;
+  // una sola palabra rara / corta sin contexto
+  if (t.split(/\s+/).length === 1 && t.length <= 10) {
+    const allowed = ['si','sí','no','ok','dale','hola','chau','chao','gracias'];
+    return !allowed.includes(t);
+  }
+  return false;
+}
+
+// Limpia "desde barrio Central" -> "Central"
+function cleanBarrio(raw) {
+  let s = normalize(raw);
+
+  // quita prefijos frecuentes
+  s = s.replace(/\b(desde|de|del|de la|de los|de las|desde el|desde la)\b/gi, ' ').trim();
+  s = s.replace(/\b(urbanizaci[oó]n|urb\.?|barrio|zona|comunidad|ciudadela|u\.?)\b/gi, ' ').trim();
+
+  s = s.replace(/\s+/g, ' ').trim();
+
+  // capitaliza
+  s = s.split(' ')
+    .filter(Boolean)
+    .map(w => w[0].toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+
+  if (!s) s = normalize(raw);
+  return s;
+}
+
+// Extrae tema + detalle (ahora incluye tránsito)
+function extractIssue(raw) {
+  const t = normLower(raw);
+
+  const themes = [
+    { key: 'transito', label: 'tránsito y seguridad vial', terms: ['accidente','accidentes','tránsito','transito','señal','señales','señalización','semáforo','semaforo','velocidad','moto','motocicleta','auto','peatón','peaton','paso de cebra','cruce'] },
+    { key: 'basura', label: 'basura y limpieza', terms: ['basura','sucio','suciedad','limpieza','recojo','recolección','contenedor'] },
+    { key: 'agua', label: 'agua y alcantarillado', terms: ['agua','cortes','presión','alcantarillado','desagüe','desague'] },
+    { key: 'calles', label: 'calles y baches', terms: ['bache','baches','asfalto','pavimento','calle','avenida','camino','polvo'] },
+    { key: 'seguridad', label: 'seguridad ciudadana', terms: ['robo','robos','inseguridad','delincuencia','seguridad'] },
+    { key: 'iluminacion', label: 'iluminación', terms: ['luz','luces','alumbrado','iluminación','iluminacion','poste'] },
+  ];
+
+  let label = 'un problema del barrio';
+  for (const th of themes) {
+    if (th.terms.some(w => t.includes(w))) { label = th.label; break; }
+  }
+
+  // detalle: intenta capturar “en … / sobre …”
+  let detail = '';
+  const m1 = raw.match(/\b(en|sobre|por)\s+(.{3,60})/i);
+  if (m1) detail = m1[2].trim();
+  detail = detail.replace(/\s+/g, ' ').trim();
+  if (detail.length > 60) detail = detail.slice(0, 60).trim();
+
+  // resumen corto
+  let summary = label;
+  if (detail) summary += ` (${detail})`;
+
+  return { label, detail, summary };
+}
 
 function newSession() {
   return {
     step: 1,
     barrio: null,
+    demandaRaw: null,
+    issue: null,
     afiliado: null,
     rival: null,
     razon: null,
-    demanda: null,
-    lastSentAt: 0,
+    saidGoodbye: false,
   };
 }
 
-// Mensajes (tú puedes ajustar estilo aquí sin tocar lógica)
 const MSG = {
-  paso1: `¡Hola! Te habla Fernando León. Soy Ingeniero Agrónomo, y mi formación me ha dado una gran capacidad técnica para la gestión eficiente de recursos, porque los recursos públicos —como el agua y la tierra— deben manejarse con conocimiento y transparencia.
+  // 👇 IMPORTANTE: acá SOLO presentación (sin volver a pedir barrio)
+  paso1: `¡Hola! Soy Fernando León, candidato a Alcade de Villa Montes. Estoy aquí para escuchar y tomar nota de lo que pasa en tu zona.`,
 
-Pero más allá de los títulos, soy un vecino que cree que nuestra ciudad merece un futuro donde el trabajo digno y la esperanza sean accesibles para todos.
+  pedirBarrio: `¿De qué barrio, comunidad o zona me escribes?`,
 
-¿Puedo conocerte un poco?`,
+  pedirProblema: (barrio) => `Gracias, ¿Qué problema te preocupa más ahí? puedes detallarlo`,
 
-  paso2: `Para mí, lo más importante son las personas en su entorno. ¿Desde qué barrio, comunidad o urbanización me escribes? Así puedo ubicar mejor tus necesidades.`,
+  problemaOk: (barrio, summary) =>
+    `Entendido. En ${barrio} el tema es **${summary}**. Gracias por contármelo.`,
 
-  paso21: (barrio) => `¡Gracias! Conozco ${barrio} muy bien. He recorrido esa zona y conozco las necesidades específicas que allí se deben resolver —desde el acceso a servicios básicos hasta la generación de oportunidades económicas locales. Es una comunidad con mucho potencial.`,
+  pedirAfiliacion: `Solo para entenderte mejor: ¿hoy simpatizas con algún partido o agrupación? (SI/NO)`,
 
-  paso3: `Antes de contarte más, quiero escucharte. ¿Habías escuchado antes de nuestra agrupación ciudadana MATE (Movimiento Autonomista de Trabajo y Esperanza)? ¿Qué es lo primero que te viene a la mente?`,
+  rival: `¿Con cuál agrupación o partido te identificas?`,
+  razonRival: (r) => `¿Qué es lo que más valoras de ${r}?`,
+  puenteRival: `Gracias. Aunque pensemos distinto, lo importante es resolver lo que afecta al barrio.`,
 
-  paso3_pos: (detalle) => `Me alegra mucho oír eso. Efectivamente, MATE representa precisamente ${detalle || 'esa esperanza de cambio desde la base'}. Somos vecinos organizados para cambiar las cosas.`,
+  preguntarMate: `Y una última: ¿habías escuchado de MATE? (SI/NO)`,
+  mate_si: `Qué bueno. MATE es una agrupación de vecinos para trabajar desde los barrios, con técnica y cercanía.`,
+  mate_no: `Te entiendo. MATE no es un partido antiguo: es gente común organizándose desde el territorio.`,
 
-  paso3_neg: `Te entiendo perfectamente. Mucha gente está cansada de la política tradicional. Por eso MATE no es un partido antiguo: es una agrupación de ciudadanos comunes que creemos que las soluciones nacen desde los barrios, no desde escritorios alejados de la realidad.`,
+  cierre: `Gracias por escribirme. Si luego quieres agregar algo, aquí estoy 🙂`,
+  despedidaFinal: `Perfecto. Gracias por tu tiempo. Un abrazo 🙂`,
+  nonsense: `Te leo 🙂 Si quieres, cuéntame en una frase qué necesitas (o /reset).`,
 
-  paso4: `Una pregunta directa, de vecino a vecino: ¿Te sientes identificado o simpatizas con algún partido político o agrupación en este momento? (Responde: SI o NO)`,
-
-  paso5A: `Es comprensible. Hoy mucha gente se siente desconectada de las opciones políticas. Precisamente por eso nació MATE: para ser la voz de quienes no se ven representados en los espacios tradicionales.`,
-
-  paso6A: `¿Te gustaría ser parte de algo nuevo, construido desde cero por gente como tú? No te pido un compromiso inmediato, solo te invito a conocer y conversar.`,
-
-  pasoA_si: `¡Excelente noticia! Un coordinador de tu zona se pondrá en contacto contigo para invitarte a nuestro próximo círculo de vecinos MATE. Mientras tanto, ¿puedo compartirte una de nuestras propuestas principales? (SI/NO)`,
-
-  pasoA_no: `Totalmente respetable. Mi compromiso es escuchar a todos los vecinos, independientemente de su postura. ¿Puedo saber cuál es la principal preocupación que tienes sobre nuestro distrito/ciudad?`,
-
-  paso5B: `Te agradezco la honestidad. ¿Con qué agrupación o partido te sientes identificado?`,
-
-  paso6B: (rival) => `Entiendo. ¿Qué fue lo que más te convenció de ${rival} o qué valor ves en ellos?`,
-
-  paso7B: (razon) => `Gracias por compartir eso. Valoro mucho que destaques ${razon}. En MATE también creemos en esos valores, pero con un enfoque más autónomo, técnico y desde los barrios. Aunque tengamos diferencias, mi puerta —y la de MATE— está siempre abierta para trabajar juntos en lo que nos une: el bienestar de nuestros vecinos.`,
-
-  paso8: (barrio) => `Ahora, lo más importante. Como vecino de ${barrio || 'tu zona'}, ¿cuál es el único problema que, si el próximo alcalde lo soluciona, mejoraría realmente tu calidad de vida? (Puede ser desde un servicio básico hasta oportunidades económicas).`,
-
-  paso81: (demanda) => `Registrado en mi agenda: “${demanda}”.
-
-Esto es exactamente el tipo de problemas concretos para los que mi formación como ingeniero y nuestro enfoque en MATE buscan soluciones técnicas y viables. Tu voz cuenta.`,
-
-  paso9: `Con todo lo que me compartes, tiene sentido que te cuente una de nuestras propuestas concretas. ¿Te gustaría conocer la idea central de mi plan para atender problemas como el que mencionas? (SI/NO)`,
-
-  paso9_si: (barrio, demanda) => `Propuesta MATE: Como Ingeniero Agrónomo, aplicaré gestión técnica de recursos para abordar problemas como “${demanda}”.
-
-Por ejemplo, en ${barrio} podríamos implementar una solución concreta basada en diagnóstico técnico y ejecución transparente. Esto y más está en nuestro plan completo. ¿Quieres que te comparta el enlace? (SI/NO)`,
-
-  paso9_no: `Lo respeto. La información estará disponible cuando quieras. Mi propuesta principal es gestión técnica con escucha activa.`,
-
-  paso10: `Ha sido un gusto conocerte. Esta conversación queda registrada, y tu inquietud será considerada.
-
-Te pido que guardes este chat como tu línea directa con nosotros. Juntos podemos lograr el cambio que necesitamos.`,
+  abuso: `Entiendo el enojo, pero no puedo continuar si usas insultos. Si querés, contame el problema con respeto y te leo.`,
 };
 
-// Decide siguiente acción según step y mensaje del usuario
 function handleIncoming(session, userText) {
   const text = normalize(userText);
-
-  // Comandos útiles
   const tLower = normLower(text);
+
   if (tLower === '/reset') {
-    return { reset: true, reply: 'Listo. Reinicié la conversación. Escribe “hola” para comenzar de nuevo.' };
+    return { reset: true, reply: 'Reiniciado. Escribe “hola” para comenzar.' };
   }
 
-  // Si es la primera vez o sesión no existe, no dependas de “hola”; arranca paso 1 con cualquier cosa
-  switch (session.step) {
-    case 1: {
-      // Paso 1 ya se considera enviado (lo manda index.js al crear sesión)
-      // Cualquier respuesta avanza a paso 2
-      session.step = 2;
-      return { reply: MSG.paso2, session };
-    }
+  // Bloqueo por insultos/malas palabras
+  if (containsAbuse(text)) {
+    return { reply: MSG.abuso, session, blocked: true };
+  }
 
-    case 2: {
-      // Captura barrio
-      session.barrio = text;
-      session.step = 3;
-      return { reply: MSG.paso21(session.barrio) + '\n\n' + MSG.paso3, session };
-    }
-
-    case 3: {
-      const cls = classifyMate(text);
-
-      // arma “detalle” para POS/NEU: si el usuario escribió algo corto o vacío, usa default
-      const detalle = text.length >= 8 ? `“${text}”` : 'esa esperanza de cambio';
-      if (cls === 'POSITIVA' || cls === 'NEUTRA') {
-        session.step = 4;
-        return { reply: MSG.paso3_pos(detalle) + '\n\n' + MSG.paso4, session };
-      } else {
-        session.step = 4;
-        return { reply: MSG.paso3_neg + '\n\n' + MSG.paso4, session };
+  // Manejo “post-cierre” (step 10) -> handoff a RAG
+  if (session.step === 10) {
+    if (looksLikeClosing(text)) {
+      if (!session.saidGoodbye) {
+        session.saidGoodbye = true;
+        return { reply: MSG.despedidaFinal, session };
       }
+      return { reply: '🙂', session };
     }
 
+    if (looksLikeNonsense(text)) {
+      return { reply: MSG.nonsense, session };
+    }
+
+    // ✅ En step 10 NO mandamos MSG.cierre; entregamos al RAG
+    return { handoffToRag: true, session };
+  }
+
+  switch (session.step) {
+    // 1 -> pedir barrio
+    case 1: {
+      session.step = 2;
+      return { reply: MSG.pedirBarrio, session };
+    }
+
+    // 2 -> guardar barrio, pedir problema
+    case 2: {
+      session.barrio = cleanBarrio(text);
+      session.step = 3;
+      return { reply: MSG.pedirProblema(session.barrio), session };
+    }
+
+    // 3 -> guardar problema, confirmar, luego afiliación
+    case 3: {
+      session.demandaRaw = text;
+      session.issue = extractIssue(text);
+      session.step = 4;
+      return { reply: `${MSG.problemaOk(session.barrio || 'tu zona', session.issue.summary)}\n\n${MSG.pedirAfiliacion}`, session };
+    }
+
+    // 4 -> afiliación SI/NO
     case 4: {
       if (isYes(text)) {
         session.afiliado = 'SI';
-        session.step = 5; // rama B
-        return { reply: MSG.paso5B, session };
+        session.step = 5;
+        return { reply: MSG.rival, session };
       }
       if (isNo(text)) {
         session.afiliado = 'NO';
-        session.step = 50; // rama A
-        return { reply: MSG.paso5A + '\n\n' + MSG.paso6A, session };
-      }
-      // Si responde raro, pedir SI/NO
-      return { reply: 'Gracias. Para ubicarte mejor: ¿simpatizas con algún partido o agrupación? Responde SI o NO.', session };
-    }
-
-    // RAMA A (NO afiliación)
-    case 50: {
-      // pregunta 6A: interés
-      if (isYes(text)) {
-        session.step = 8; // igual pasamos a demanda después de invitar
-        return { reply: MSG.pasoA_si, session };
-      }
-      if (isNo(text)) {
         session.step = 8;
-        return { reply: MSG.pasoA_no, session };
+        return { reply: MSG.preguntarMate, session };
       }
-      // neutral -> tratar como duda, ir a problema
-      session.step = 8;
-      return { reply: MSG.pasoA_no, session };
+      return { reply: 'Responde SI o NO 🙂 ¿Simpatizas con algún partido o agrupación?', session };
     }
 
-    // RAMA B (SI afiliación)
+    // 5 -> rival
     case 5: {
-      // Captura rival
       session.rival = text;
       session.step = 6;
-      return { reply: MSG.paso6B(session.rival), session };
+      return { reply: MSG.razonRival(session.rival), session };
     }
 
+    // 6 -> razón -> MATE
     case 6: {
-      // Captura razón afiliación
       session.razon = text;
       session.step = 8;
-      return { reply: MSG.paso7B(session.razon) + '\n\n' + MSG.paso8(session.barrio), session };
+      return { reply: `${MSG.puenteRival}\n\n${MSG.preguntarMate}`, session };
     }
 
+    // 8 -> MATE -> cierre
     case 8: {
-      // Captura demanda
-      session.demanda = text;
-      session.step = 9;
-      return { reply: MSG.paso81(session.demanda) + '\n\n' + MSG.paso9, session };
-    }
-
-    case 9: {
-      if (isYes(text)) {
-        session.step = 10;
-        return { reply: MSG.paso9_si(session.barrio || 'tu zona', session.demanda || 'tu preocupación') + '\n\n' + MSG.paso10, session };
-      }
-      if (isNo(text)) {
-        session.step = 10;
-        return { reply: MSG.paso9_no + '\n\n' + MSG.paso10, session };
-      }
-      // si no responde claro
-      return { reply: 'Perfecto. ¿Te gustaría conocer la idea central del plan? Responde SI o NO.', session };
-    }
-
-    case 10: {
-      // Conversación finalizada. Puedes reiniciar o entrar a RAG.
-      return { reply: 'Si quieres, puedo seguir escuchándote. También puedes escribir /reset para comenzar nuevamente.', session };
+      session.step = 10;
+      if (isYes(text)) return { reply: `${MSG.mate_si}\n\n${MSG.cierre}`, session };
+      if (isNo(text)) return { reply: `${MSG.mate_no}\n\n${MSG.cierre}`, session };
+      return { reply: MSG.cierre, session };
     }
 
     default:
@@ -226,4 +235,4 @@ function handleIncoming(session, userText) {
   }
 }
 
-module.exports = { newSession, handleIncoming, MSG };
+module.exports = { newSession, handleIncoming, MSG, containsAbuse };
