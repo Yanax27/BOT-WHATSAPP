@@ -72,28 +72,6 @@ node index.js
 
 ---
 
-## 📂 Estructura de Carpetas
-
-\`\`\`text
-/tu_proyecto
-│
-├── /rag_api                # Backend (Inteligencia Artificial)
-│   ├── /data               # Aquí van los archivos fernando_leon.md y ruben_vaca.md
-│   ├── /storage            # Memoria vectorial generada por ingest.py
-│   ├── ingest.py           # Script para ENTRENAR la IA
-│   ├── server.py           # Script para LEVANTAR la API
-│   └── requirements.txt    # Librerías de Python
-│
-└── /wa_bot                 # Frontend (WhatsApp)
-    ├── /assets             # Imágenes (fer_ru.jpeg, fernando.jpeg, ruben.jpeg) y triptico.pdf
-    ├── /auth               # Sesión guardada de WhatsApp
-    ├── /state              # Memoria de usuarios saludados
-    ├── index.js            # Script para LEVANTAR el bot
-    └── package.json        # Librerías de Node.js
-\`\`\`
-
----
-
 ## 💬 Funciones Principales
 
 - **Presentación Visual:** Al iniciar, el bot envía fotos de los candidatos y pregunta si el vecino desea el tríptico en PDF.
